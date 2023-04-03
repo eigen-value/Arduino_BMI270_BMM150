@@ -22,6 +22,7 @@
 #include "utilities/BMI270-Sensor-API/bmi270.h"
 #include "utilities/BMM150-Sensor-API/bmm150.h"
 
+
 struct dev_info {
   TwoWire* _wire;
   uint8_t dev_addr;
@@ -49,6 +50,11 @@ class BoschSensorClass {
     }
     PinName BMI270_INT1 = NC;
     #endif
+    // Calibration
+    virtual int calibrate_all();  // Performs all sensors calibration
+    virtual int calibrate_gyro();
+    virtual int calibrate_accel();
+
     // Accelerometer
     virtual int readAcceleration(float& x, float& y, float& z); // Results are in G (earth gravity).
     virtual int accelerationAvailable(); // Number of samples in the FIFO.
@@ -70,7 +76,23 @@ class BoschSensorClass {
     // can be modified by subclassing for finer configuration
     virtual int8_t configure_sensor(struct bmm150_dev *dev);
     virtual int8_t configure_sensor(struct bmi2_dev *dev);
-
+    virtual int8_t calibrate_sensor_gyro(struct bmi2_dev *dev);
+    virtual int8_t calibrate_sensor_accel(struct bmi2_dev *dev);
+    virtual int8_t accel_foc_report(uint8_t range,
+                               int16_t avg_accel_foc_data,
+                               int16_t reference,
+                               uint8_t foc_sign,
+                               int16_t min_val,
+                               int16_t max_val);
+    virtual void calculate_noise(int8_t matched_axis,
+                            struct bmi2_sens_axes_data *accel_foc_data,
+                            struct bmi2_sens_axes_data avg_accel_foc_data);
+    virtual int8_t verify_accel_foc_data(uint8_t range,
+                                    int16_t reference,
+                                    int8_t matched_axis,
+                                    uint8_t foc_sign,
+                                    struct bmi2_dev *bmi2_dev);
+    virtual int8_t perform_foc_range_test(uint8_t range, uint8_t input_axis, struct bmi2_dev *bmi2_dev);
   private:
     static int8_t bmi2_i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr);
     static int8_t bmi2_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr);

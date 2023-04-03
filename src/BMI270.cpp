@@ -2,6 +2,27 @@
 #include "Wire.h"
 #include "BoschSensorClass.h"
 
+/******************************************************************************/
+/*!                   Macro Definitions                                       */
+
+#define ACCEL_SAMPLE_COUNT  UINT8_C(100)
+
+/******************************************************************************/
+/*!         Global Variable Declaration                                       */
+
+/* Structure to store temporary axes data values */
+struct temp_axes_val
+{
+    /* X data */
+    int32_t x;
+
+    /* Y data */
+    int32_t y;
+
+    /* Z data */
+    int32_t z;
+};
+
 #ifdef __MBED__
 #include "mbed_events.h"
 #include "mbed_shared_queues.h"
@@ -73,6 +94,28 @@ int BoschSensorClass::begin() {
   print_rslt(rslt);
 
   _initialized = true;
+
+  return 1;
+}
+
+
+int BoschSensorClass::calibrate_all() {
+  calibrate_gyro();
+  calibrate_accel();
+
+  return 1;
+}
+
+int BoschSensorClass::calibrate_gyro() {
+  int8_t rslt = calibrate_sensor_gyro(&bmi2);
+  print_rslt(rslt);
+
+  return 1;
+}
+
+int BoschSensorClass::calibrate_accel() {
+  int8_t rslt = calibrate_sensor_accel(&bmi2);
+  print_rslt(rslt);
 
   return 1;
 }
@@ -242,6 +285,569 @@ int8_t BoschSensorClass::configure_sensor(struct bmi2_dev *dev)
     return rslt;
 
   return rslt;
+}
+
+int8_t BoschSensorClass::calibrate_sensor_gyro(struct bmi2_dev *dev) {
+  /*
+  Calibrates the gyro
+  If calibration is needed call this method after configure_sensor
+  */
+
+  int8_t rslt;
+
+  rslt = bmi2_do_crt(dev);
+  print_rslt(rslt);
+  if (rslt != BMI2_OK)
+    return rslt;
+
+  rslt = bmi2_perform_gyro_foc(dev);
+  print_rslt(rslt);
+  if (rslt != BMI2_OK)
+    return rslt;
+
+  return rslt;
+}
+
+int8_t BoschSensorClass::calibrate_sensor_accel(struct bmi2_dev *dev) {
+    /* Sensor initialization configuration. */
+
+    uint8_t _try = 0, j = 0;
+    int8_t rslt;
+    char resp;
+    uint8_t sens_list = BMI2_ACCEL;
+    struct bmi2_sens_config sens_cfg = { 0 };
+    uint8_t data = 0, range, input_axis = 0;
+
+    /* Interface reference is given as a parameter
+     * For I2C : BMI2_I2C_INTF
+     * For SPI : BMI2_SPI_INTF
+     */
+
+    // The following lines have been removed because dev is internal and its interface already configured
+    // rslt = bmi2_interface_init(dev, BMI2_SPI_INTF);
+    // print_rslt(rslt);
+
+    _debug->print("Functional test for accel foc start..\n\n");
+
+    _debug->print("Choose the axis for accel FOC to be done\n");
+    _debug->print("Press '1' to choose X axis\n");
+    _debug->print("Press '2' to choose Y axis\n");
+    _debug->print("Press '3' to choose Z axis\n");
+
+    _debug->print("Press '4' to choose -X axis\n");
+    _debug->print("Press '5' to choose -Y axis\n");
+    _debug->print("Press '6' to choose -Z axis\n");
+
+    while (1)
+    {
+        resp = _debug->read();
+        input_axis = atoi(&resp);
+        if (input_axis > 0 && input_axis < 7)
+        {
+            break;
+        }
+    }
+
+    if (input_axis == 1)
+    {
+        _debug->print("The choosen input axis for FOC is : X\n");
+    }
+    else if (input_axis == 2)
+    {
+        _debug->print("The choosen input axis for FOC is : Y\n");
+    }
+    else if (input_axis == 3)
+    {
+        _debug->print("The choosen input axis for FOC is : Z\n");
+    }
+    else if (input_axis == 4)
+    {
+        _debug->print("The choosen input axis for FOC is : -X\n");
+    }
+    else if (input_axis == 5)
+    {
+        _debug->print("The choosen input axis for FOC is : -Y\n");
+    }
+    else if (input_axis == 6)
+    {
+        _debug->print("The choosen input axis for FOC is : -Z\n");
+    }
+
+    _debug->print("Confirm your chosen axis and the sensor keeping position are same before doing FOC\n");
+
+    for (j = 0; j < 2; j++)
+    {
+        _try = 0;
+
+        if (j == 1)
+        {
+            _debug->print("Keep sensor in wrong position and press 5\n");
+        }
+        else if (j == 0)
+        {
+            _debug->print("Keep sensor in right position and press 5\n");
+        }
+
+        while (1)
+        {
+            resp = _debug->read();
+            _try = atoi(&resp);
+            if (_try == 5)
+            {
+                break;
+            }
+        }
+
+        for (range = BMI2_ACC_RANGE_2G; range <= BMI2_ACC_RANGE_16G; range++)
+        {
+            /****************************************************************/
+            /* Initialize by enabling configuration load */
+            _debug->print("#########################################################\n\n");
+
+            rslt = bmi270_init(dev);
+            print_rslt(rslt);
+
+            sens_cfg.type = BMI2_ACCEL;
+
+            /* Testing with different settings other than the default configurations
+             *  Default is : 50Hz ODR and 2g RANGE
+             *  Note - Change accel_conf.range for testing in different range values
+             */
+            sens_cfg.cfg.acc.odr = BMI2_ACC_ODR_50HZ;
+            sens_cfg.cfg.acc.bwp = BMI2_ACC_NORMAL_AVG4;
+
+            /****************************************************************/
+            sens_cfg.cfg.acc.range = range;
+
+            /* Set the configuration details */
+            rslt = bmi270_set_sensor_config(&sens_cfg, 1, dev);
+            print_rslt(rslt);
+
+            /* NOTE:
+             * Accel and Gyro enable must be done after setting configurations
+             */
+            rslt = bmi270_sensor_enable(&sens_list, 1, dev);
+            print_rslt(rslt);
+
+            /* Get the configuration details to verify whether the configured values are set */
+            rslt = bmi270_get_sensor_config(&sens_cfg, 1, dev);
+            print_rslt(rslt);
+
+            _debug->print("ODR = "); _debug->print(sens_cfg.cfg.acc.odr);
+            _debug->print(", RANGE = "); _debug->print(sens_cfg.cfg.acc.range);
+            _debug->print(", BANDWIDTH = "); _debug->print(sens_cfg.cfg.acc.bwp);
+            _debug->print("\n");
+
+            /* Perform FOC for different ranges */
+            rslt = perform_foc_range_test(range, input_axis, dev);
+
+            if ((j == 1) && (rslt == BMI2_E_OUT_OF_RANGE))
+            {
+                _debug->print("\n#########   Valid input - Wrong position   #########\n\n");
+                print_rslt(rslt);
+            }
+            else if ((j == 0) && (rslt == BMI2_OK))
+            {
+                _debug->print("\n#########   Valid input - Right position   #########\n\n");
+                print_rslt(rslt);
+            }
+            else if ((j == 1) && (rslt == BMI2_OK))
+            {
+                _debug->print("\n#########   Invalid input - Right position   #########\n\n");
+                print_rslt(rslt);
+            }
+            else if ((j == 0) && (rslt == BMI2_E_OUT_OF_RANGE))
+            {
+                _debug->print("\n#########   Invalid input - Wrong position   #########\n\n");
+                print_rslt(rslt);
+            }
+            else if ((j == 0) && (rslt == BMI2_E_OUT_OF_RANGE))
+            {
+                _debug->print("\n#########   Valid input - Right position   #########\n\n");
+                _debug->print("\n#########   Before FOC is better than after FOC   #########\n\n");
+                print_rslt(rslt);
+            }
+            else if ((j == 1) && (rslt == BMI2_E_OUT_OF_RANGE))
+            {
+                _debug->print("\n#########   Invalid input - Right position   #########\n\n");
+                _debug->print("\n#########   Before FOC is better than after FOC   #########\n\n");
+                print_rslt(rslt);
+            }
+        }
+
+        /* Disable offset compensation */
+        rslt = bmi2_get_regs(BMI2_NV_CONF_ADDR, &data, 1, dev);
+        print_rslt(rslt);
+
+        data = BMI2_SET_BIT_VAL0(data, BMI2_NV_ACC_OFFSET);
+
+        rslt = bmi2_set_regs(BMI2_NV_CONF_ADDR, &data, 1, dev);
+        print_rslt(rslt);
+
+        /* Get the accelerometer configuration details to verify whether it is reverted back to the configured ones */
+        rslt = bmi270_get_sensor_config(&sens_cfg, 1, dev);
+        print_rslt(rslt);
+    }
+
+    // This has been eliminated because depends externally on COINES
+    // bmi2_coines_deinit();
+
+    return rslt;
+}
+
+int8_t BoschSensorClass::accel_foc_report(uint8_t range,
+                               int16_t avg_accel_foc_data,
+                               int16_t reference,
+                               uint8_t foc_sign,
+                               int16_t min_val,
+                               int16_t max_val)
+{
+    int8_t rslt = BMI2_OK;
+    int16_t diff_after = 0;
+
+    if (foc_sign == 0)
+    {
+        if ((avg_accel_foc_data >= (min_val)) && (avg_accel_foc_data <= (max_val)))
+        {
+            if (avg_accel_foc_data >= reference)
+            {
+                diff_after = avg_accel_foc_data - reference;
+            }
+            else
+            {
+                diff_after = reference - avg_accel_foc_data;
+            }
+
+
+            _debug->print("\n# ********** PASS | Difference = "); _debug->print(diff_after); _debug->print("**********\n");
+            _debug->print("\n# Avg_FOC "); _debug->print(avg_accel_foc_data); _debug->print(" in range\n");
+
+            rslt = BMI2_OK;
+        }
+        else
+        {
+            if (avg_accel_foc_data >= reference)
+            {
+                diff_after = avg_accel_foc_data - reference;
+            }
+            else
+            {
+                diff_after = reference - avg_accel_foc_data;
+            }
+
+            _debug->print("\n# ********** FAIL | Difference = "); _debug->print(diff_after); _debug->print("**********\n");
+            _debug->print("\n# Avg_FOC "); _debug->print(avg_accel_foc_data); _debug->print(" not in range\n");
+
+            rslt = BMI2_E_OUT_OF_RANGE;
+        }
+    }
+
+    if (foc_sign == 1)
+    {
+        if ((avg_accel_foc_data <= (min_val)) && (avg_accel_foc_data >= (max_val)))
+        {
+            if (avg_accel_foc_data <= reference)
+            {
+                diff_after = avg_accel_foc_data - reference;
+            }
+            else
+            {
+                diff_after = reference - avg_accel_foc_data;
+            }
+
+            _debug->print("\n# ********** PASS | Difference = "); _debug->print(diff_after); _debug->print("**********\n");
+            _debug->print("\n# Avg_FOC "); _debug->print(avg_accel_foc_data); _debug->print(" in range\n");
+            rslt = BMI2_OK;
+        }
+        else
+        {
+            if (avg_accel_foc_data <= reference)
+            {
+                diff_after = avg_accel_foc_data - reference;
+            }
+            else
+            {
+                diff_after = reference - avg_accel_foc_data;
+            }
+
+            _debug->print("\n# ********** FAIL | Difference = "); _debug->print(diff_after); _debug->print("**********\n");
+            _debug->print("\n# Avg_FOC "); _debug->print(avg_accel_foc_data); _debug->print(" not in range\n");
+            rslt = BMI2_E_OUT_OF_RANGE;
+        }
+    }
+
+    return rslt;
+}
+
+void BoschSensorClass::calculate_noise(int8_t matched_axis,
+                            struct bmi2_sens_axes_data *accel_foc_data,
+                            struct bmi2_sens_axes_data avg_accel_foc_data)
+{
+    uint16_t variance = 0;
+    uint16_t noise_level = 0;
+    uint16_t index = 0;
+
+    if (matched_axis == 'X')
+    {
+        for (index = 0; index < ACCEL_SAMPLE_COUNT; index++)
+        {
+            variance +=
+                ((accel_foc_data[index].x - avg_accel_foc_data.x) * (accel_foc_data[index].x - avg_accel_foc_data.x));
+        }
+    }
+    else if (matched_axis == 'Y')
+    {
+        for (index = 0; index < ACCEL_SAMPLE_COUNT; index++)
+        {
+            variance +=
+                ((accel_foc_data[index].y - avg_accel_foc_data.y) * (accel_foc_data[index].y - avg_accel_foc_data.y));
+        }
+    }
+    else if (matched_axis == 'Z')
+    {
+        for (index = 0; index < ACCEL_SAMPLE_COUNT; index++)
+        {
+            variance +=
+                ((accel_foc_data[index].z - avg_accel_foc_data.z) * (accel_foc_data[index].z - avg_accel_foc_data.z));
+        }
+    }
+
+    noise_level = sqrt(variance);
+
+    _debug->print("\n# ********** NOISE LEVEL = "); _debug->print(noise_level); _debug->print(" **********\n");
+}
+
+int8_t BoschSensorClass::verify_accel_foc_data(uint8_t range,
+                                    int16_t reference,
+                                    int8_t matched_axis,
+                                    uint8_t foc_sign,
+                                    struct bmi2_dev *bmi2_dev) {
+
+    int8_t rslt = BMI2_E_INVALID_STATUS;
+    uint8_t i;
+    uint16_t reg_status = 0;
+    int16_t xl, yl, zl;
+    int16_t xh, yh, zh;
+    int16_t min_val = 0;
+    int16_t max_val = 0;
+    struct bmi2_sens_axes_data accel_foc_data[ACCEL_SAMPLE_COUNT] = { { 0 } };
+    struct temp_axes_val temp_foc_data = { 0 };
+    struct bmi2_sens_axes_data avg_accel_foc_data = { 0 };
+    struct bmi2_sens_data sensor_data = { { 0 } };
+
+    /* Setting initial values */
+    xl = yl = zl = 32767;
+    xh = yh = zh = -32768;
+
+    /* Map data ready interrupt to interrupt pin. */
+    rslt = bmi2_map_data_int(BMI2_DRDY_INT, BMI2_INT1, bmi2_dev);
+    print_rslt(rslt);
+
+    /* Read accelerometer values before/after FOC */
+    for (i = 0; i < ACCEL_SAMPLE_COUNT; i++)
+    {
+        while (1)
+        {
+            /* To get the data ready interrupt status */
+            rslt = bmi2_get_int_status(&reg_status, bmi2_dev);
+            print_rslt(rslt);
+
+            /* Read accelerometer data based on data ready interrupt */
+            if ((rslt == BMI2_OK) && (reg_status & BMI2_ACC_DRDY_INT_MASK))
+            {
+                rslt = bmi2_get_sensor_data(&sensor_data, bmi2_dev);
+                print_rslt(rslt);
+
+                memcpy(&accel_foc_data[i], &sensor_data.acc, sizeof(struct bmi2_sens_axes_data));
+
+                _debug->print("X["); _debug->print(i); _debug->print("] = "); _debug->print(accel_foc_data[i].x);
+                _debug->print(",  Y["); _debug->print(i); _debug->print("] = "); _debug->print(accel_foc_data[i].y); 
+                _debug->print(",  Z["); _debug->print(i); _debug->print("] = "); _debug->print(accel_foc_data[i].z);
+                _debug->println(" ");
+
+                if (xl > accel_foc_data[i].x)
+                {
+                    xl = accel_foc_data[i].x;
+                }
+
+                if (xh < accel_foc_data[i].x)
+                {
+                    xh = accel_foc_data[i].x;
+                }
+
+                if (yl > accel_foc_data[i].y)
+                {
+                    yl = accel_foc_data[i].y;
+                }
+
+                if (yh < accel_foc_data[i].y)
+                {
+                    yh = accel_foc_data[i].y;
+                }
+
+                if (zl > accel_foc_data[i].z)
+                {
+                    zl = accel_foc_data[i].z;
+                }
+
+                if (zh < accel_foc_data[i].z)
+                {
+                    zh = accel_foc_data[i].z;
+                }
+
+                temp_foc_data.x += accel_foc_data[i].x;
+                temp_foc_data.y += accel_foc_data[i].y;
+                temp_foc_data.z += accel_foc_data[i].z;
+                break;
+
+            }
+        }
+    }
+
+    /* Taking average values to calculate percentage deviation */
+    avg_accel_foc_data.x = (int16_t)(temp_foc_data.x / ACCEL_SAMPLE_COUNT);
+    avg_accel_foc_data.y = (int16_t)(temp_foc_data.y / ACCEL_SAMPLE_COUNT);
+    avg_accel_foc_data.z = (int16_t)(temp_foc_data.z / ACCEL_SAMPLE_COUNT);
+
+    _debug->print("********* MIN & MAX VALUES ********\n");
+
+    _debug->print("XL = "); _debug->print(xl);
+    _debug->print("  YL = "); _debug->print(yl);
+    _debug->print("  ZL = "); _debug->print(zl);
+    _debug->println(" ");
+    _debug->print("XH = "); _debug->print(xh);
+    _debug->print("  YH = "); _debug->print(yh);
+    _debug->print("  ZH = "); _debug->print(zh);
+    _debug->println(" ");
+
+
+    _debug->print("***** AVERAGE AFTER FOC *****\n");
+
+    _debug->print("Avg-X = "); _debug->print(avg_accel_foc_data.x);
+    _debug->print("  Avg-Y = "); _debug->print(avg_accel_foc_data.y);
+    _debug->print("  Avg-Z = "); _debug->print(avg_accel_foc_data.z);
+    _debug->println(" ");
+
+    return rslt;
+
+}
+
+/* Perform FOC for different range and resolutions */
+int8_t BoschSensorClass::perform_foc_range_test(uint8_t range, uint8_t input_axis, struct bmi2_dev *bmi2_dev)
+{
+    int8_t rslt;
+    int8_t matched_axis = 0;
+    int16_t reference = 0;
+
+    /* Set accel foc axis and it's sign (x, y, z, sign)*/
+    struct bmi2_accel_foc_g_value g_value_foc = { 0, 0, 0, 0 };
+
+    if (input_axis == 1)
+    {
+        g_value_foc.x = 1;
+        g_value_foc.y = 0;
+        g_value_foc.z = 0;
+        g_value_foc.sign = 0;
+    }
+    else if (input_axis == 2)
+    {
+        g_value_foc.x = 0;
+        g_value_foc.y = 1;
+        g_value_foc.z = 0;
+        g_value_foc.sign = 0;
+    }
+    else if (input_axis == 3)
+    {
+        g_value_foc.x = 0;
+        g_value_foc.y = 0;
+        g_value_foc.z = 1;
+        g_value_foc.sign = 0;
+    }
+    else if (input_axis == 4)
+    {
+        g_value_foc.x = 1;
+        g_value_foc.y = 0;
+        g_value_foc.z = 0;
+        g_value_foc.sign = 1;
+    }
+    else if (input_axis == 5)
+    {
+        g_value_foc.x = 0;
+        g_value_foc.y = 1;
+        g_value_foc.z = 0;
+        g_value_foc.sign = 1;
+    }
+    else if (input_axis == 6)
+    {
+        g_value_foc.x = 0;
+        g_value_foc.y = 0;
+        g_value_foc.z = 1;
+        g_value_foc.sign = 1;
+    }
+
+    switch (range)
+    {
+        /* Reference LSB value of 2G */
+        case 0:
+            reference = BMI2_ACC_FOC_2G_REF;
+            break;
+
+        /* Reference LSB value of 4G */
+        case 1:
+            reference = BMI2_ACC_FOC_4G_REF;
+            break;
+
+        /* Reference LSB value of 8G */
+        case 2:
+            reference = BMI2_ACC_FOC_8G_REF;
+            break;
+
+        /* Reference LSB value of 16G */
+        case 3:
+            reference = BMI2_ACC_FOC_16G_REF;
+            break;
+    }
+
+    if (g_value_foc.x == 1)
+    {
+        matched_axis = 'X';
+    }
+    else if (g_value_foc.y == 1)
+    {
+        matched_axis = 'Y';
+    }
+    else if (g_value_foc.z == 1)
+    {
+        matched_axis = 'Z';
+    }
+
+    if (g_value_foc.sign == 1)
+    {
+        _debug->print("MATCHED AXIS is = -"); _debug->print(matched_axis); _debug->print("\n");
+    }
+    else
+    {
+        _debug->print("MATCHED AXIS is = "); _debug->print(matched_axis); _debug->print("\n");
+
+    }
+
+    _debug->print("\n\n# Before FOC\n");
+    rslt = verify_accel_foc_data(range, reference, matched_axis, g_value_foc.sign, bmi2_dev);
+
+    _debug->print("\n\n######### Perform Accel FOC #########\n\n");
+
+    /* Perform accelerometer FOC */
+    rslt = bmi2_perform_accel_foc(&g_value_foc, bmi2_dev);
+    print_rslt(rslt);
+
+    /* Provide delay after performing FOC */
+    bmi2_dev->delay_us(40000, bmi2_dev->intf_ptr);
+
+    _debug->print("\n\n# After FOC\n");
+    rslt = verify_accel_foc_data(range, reference, matched_axis, g_value_foc.sign, bmi2_dev);
+    print_rslt(rslt);
+
+    return rslt;
 }
 
 int8_t BoschSensorClass::configure_sensor(struct bmm150_dev *dev)
